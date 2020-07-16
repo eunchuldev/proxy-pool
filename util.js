@@ -1,3 +1,6 @@
+const EventEmitter = require('events');
+const Queue = require("denque");
+const PriorityQueue = require("tinyqueue");
 class DefaultDict {
   constructor(defaultInit) {
     return new Proxy({}, {
@@ -9,7 +12,36 @@ class DefaultDict {
     })
   }
 }
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+class AsyncPriorityQueue {
+  constructor(...args){
+    this.q = new PriorityQueue(...args);
+    this.resolverQ = new Queue();
+  }
+  push(val) {
+    let resolver = this.resolverQ.shift();
+    if(resolver !== undefined)
+      resolver(val);
+    else
+      this.q.push(val)
+  }
+  async pop() {
+    let next = this.q.pop();
+    if(next !== undefined)
+      return next;
+    else
+      return new Promise(resolver => this.resolverQ.push(resolver));
+  }
+  peek() {
+    return this.q.peek();
+  }
+}
 
 module.exports = {
   DefaultDict,
+  sleep,
+  AsyncPriorityQueue,
 }

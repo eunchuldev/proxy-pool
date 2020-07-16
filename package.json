@@ -10,13 +10,9 @@
   "license": "ISC",
   "dependencies": {
     "axios": "^0.19.2",
-    "flatqueue": "^1.2.1",
-    "heapify": "^0.2.1",
+    "denque": "^1.4.1",
     "proxy-chain": "^0.4.5",
     "tinyqueue": "^2.0.3"
-  },
-  "devDependencies": {
-    "jest": "^26.1.0"
   },
   "jest": {
     "testEnvironment": "node"

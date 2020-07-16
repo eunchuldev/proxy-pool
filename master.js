@@ -1,10 +1,8 @@
-const { DefaultDict } = require("./util");
-const PriorityQueue = require("tinyqueue");
+const { DefaultDict, AsyncPriorityQueue, sleep } = require("./util");
+const Queue = require("denque");
 const ProxyChain = require("proxy-chain");
 
 const PORT = 8080;
-
-const MAX_SLAVE_COUNT = 8;
 
 
 class HostStat {
@@ -12,119 +10,176 @@ class HostStat {
     this.requestedAt = new Date(0);
   }
 }
-class Slave {
+class Worker {
   constructor(deploymentConstructor, id) {
     this.hostStats = new DefaultDict(HostStat);
     this.deployment = new deploymentConstructor();
     this.firstRequestedAt = null;
-    this.isReady = false;
-    this.destroyed = false;
+    this._isReady = false;
+    this.destroyPromise = null;
+    this.destroyMarked = false;
     this.id = id;
+    this.deployPromise = null;
+  }
+  elapsed(host) {
+    return new Date() - this.hostStats[host].requestedAt;
+  }
+  liveTime() {
+    return this.firstRequestedAt? new Date() - this.firstRequestedAt: 0;
   }
   priority(host) {
     return this.hostStats[host].requestedAt.getTime();
   }
-  async deploy() {
-    await this.deployment.deploy();
-    this.firstRequestedAt = new Date();
-    this.isReady = true
+  deploy() {
+    this.deployPromise = this.deployment.deploy();
+    this._isReady = true
+  }
+  markDestroy(){
+    this.destroyMarked = true;
   }
   async destroy(){
-    this.destroyed = true;
-    this.isReady = false;
-    await this.deployment.destroy();
+    if(this.destroyPromise)
+      return await this.destroyPromise;
+    this.destroyingPromise = this.deployment.destroy();
+    this._isReady = false;
+    return await this.destroyingPromise;
   }
   isDead(){
-    return this.destroyed || !this.deployment.isAlive();
+    return this.destroyingPromise || this.destroyMarked || !this.deployment.isAlive();
   }
   address(){
-    if(!this.isReady)
-      throw new Error("slave is not ready");
+    if(!this._isReady)
+      throw new Error("worker is not ready");
     if(this.isDead())
-      throw new Error("slave is die");
+      throw new Error("worker is die");
     return this.deployment.address();
   }
+  isReady() {
+    return this._isReady
+  }
   request(host){
-    if(!this.isReady)
-      throw new Error("slave is not ready");
+    if(!this._isReady)
+      throw new Error("worker is not ready");
+    this.firstRequestedAt = this.firstRequestedAt || new Date();
     this.hostStats[host].requestedAt = new Date();
     return this.hostStats[host];
   }
 }
 
+class SimpleWorkerPool {
+  constructor(size, deploymentConstructor) {
+    this.pool = new Queue();
+    this.size = size;
+    this.nextWorkerId = 0;
+    this.deploymentConstructor = deploymentConstructor;
+    for(let i=0; i<size; ++i)
+      this.spawn();
+  }
+  spawn(){
+    let worker = new Worker(this.deploymentConstructor, this.nextWorkerId++);
+    worker.deploy();
+    this.pool.push(worker);
+  }
+  tryPull(){
+    if(this.pool.peekFront().isReady()){
+      this.spawn();
+      let worker = this.pool.shift();
+      return worker;
+    }
+    else return null;
+  }
+  async pull(){
+    this.spawn();
+    let worker = this.pool.shift();
+    await worker.deployPromise;
+    return worker;
+  }
+}
+
 class MasterProxyServerOption {
-  constructor(port, maxSlaveLiveTime = 600, desireSlaveRequestThroughputPerHost = 1000) {
+  constructor(port = 80, maxWorkerLiveTime = 600, desireRequestThroughputPerHost = 1000, spareWorkerPoolSize = 2, maxWorkerCount = 10) {
     this.port = port;
-    this.maxSlaveLiveTime = maxSlaveLiveTime;
-    this.desireSlaveRequestThroughputPerHost = desireSlaveRequestThroughputPerHost;
+    this.maxWorkerLiveTime = maxWorkerLiveTime;
+    this.desireRequestThroughputPerHost = desireRequestThroughputPerHost;
+    this.spareWorkerPoolSize = spareWorkerPoolSize;
+    this.maxWorkerCount = maxWorkerCount
   }
 }
 class MasterProxyServer {
-  constructor(deploymentConstructor, option = new MasterProxyServerOption()) {
-    this.deploymentConstructor = deploymentConstructor;
-    this.option = option;
-    this.spareSlaves = [];
-    this.slaves = {};
-    this.slaveQueueByHost = {};
-    this._nextSlaveId = 0;
+  constructor(deploymentConstructor, option) {
+    this.option = Object.assign(new MasterProxyServerOption(), option || {})
+    this.workers = {};
+    this.workerPool = new SimpleWorkerPool(this.option.spareWorkerPoolSize, deploymentConstructor);
+    this.workerCount = 0;
+    this.workerQueueByHost = {};
     this.server = new ProxyChain.Server({
-      port: option.port || 80, 
+      port: this.option.port,
       //verbose: true,
       prepareRequestFunction: async ({ request, username, password, hostname, port, isHttp, connectionId }) => {
-        const proxyUrl = await this.nextProxyUrl(request.headers.host);
-        if(proxyUrl == null)
-          throw new ProxyChain.RequestError('Proxy Pool is Empty. Try again', 500);
-        return {
-          upstreamProxyUrl: proxyUrl,
-          //requestAuthentication: false,
-          //failMsg: 'Bad username or password, please try again.',
-        };
+        try{
+          console.log(connectionId);
+          const proxyUrl = await this.nextProxyUrl(request.headers.host);
+          return { upstreamProxyUrl: proxyUrl, };
+        } catch(e){
+          console.log(e);
+          throw e;
+        }
       },
     });
+    this.server.on('connectionClosed', ({ connectionId, stats }) => {
+      console.log(`Connection ${connectionId} closed`);
+    });
   }
-  async nextProxyUrl(host) {
-    let queue = this.slaveQueueByHost[host];
-    if(queue == null){
-      queue = this.slaveQueueByHost[host] = new PriorityQueue(Object.values(this.slaves), (a, b) => a.priority(host) - b.priority(host));
-      console.log(queue);
+  async nextProxyUrl(host){
+    let queue = this.workerQueueByHost[host];
+    if(queue == null) queue = this.workerQueueByHost[host] = new AsyncPriorityQueue(Object.values(this.workers), (a, b) => a.priority(host) - b.priority(host));
+    if(queue.peek() == undefined)
+      this.tryDeployNewWorker();
+    let worker = await queue.pop();
+    while(worker.liveTime() > this.option.maxWorkerLiveTime*1000){
+      this.dropWorker(worker);
+      worker = await queue.pop();
     }
-    let slave = queue.pop();
-    while(slave != undefined && slave.isDead()){
-      console.log("slave is dead. skip it");
-      delete this.slaves[slave.id];
-      slave = queue.pop();
+    while(worker.isDead()){
+      console.log("dead", worker.id);
+      this.dropWorker(worker);
+      if(queue.peek() == undefined)
+        this.tryDeployNewWorker();
+      worker = await queue.pop();
     }
-    if(slave == undefined){
-      console.log("no slave available. deploy new one");
-      await this.deploySlave();
+    console.log("elapsed", worker.id, worker.elapsed(host));
+    if(worker.elapsed(host) < 1000/this.option.desireRequestThroughputPerHost){
+      this.tryDeployNewWorker();
+      await sleep(1000/this.option.desireRequestThroughputPerHost - worker.elapsed(host))
+    }
+    worker.request(host);
+    queue.push(worker);
+    return worker.address();
+  }
+  dropWorker(worker){
+    if(this.workers[worker.id]){
+      delete this.workers[worker.id];
+      this.workerCount -= 1;
+      if(this.workerCount === 0)
+        this.tryDeployNewWorker();
+    }
+    worker.markDestroy();
+    worker.destroy();
+  }
+  async tryDeployNewWorker(){
+    if(this.deploying || this.workerCount >= this.option.maxWorkerCount)
       return null;
+    this.workerCount += 1;
+    this.deploying = true;
+    let worker = await this.workerPool.pull()
+    this.workers[worker.id] = worker
+    for(let k in this.workerQueueByHost){
+      this.workerQueueByHost[k].push(worker);
     }
-    let elapsed = new Date() - slave.hostStats[host].requestedAt;
-    if(elapsed < 1/this.option.desireSlaveRequestThroughputPerHost)
-      this.deploySlave();
-    slave.request(host);
-    queue.push(slave);
-    return slave.address();
-  }
-  async slaveExpiringCheck(slave, host) {
-  }
-  async deploySlave(){
-    if(this._deploying)
-      return null;
-    this._deploying = true;
-    let slave = new Slave(this.deploymentConstructor, this._nextSlaveId++);
-    await slave.deploy();
-    this.slaves[slave.id] = slave
-    for(let k in this.slaveQueueByHost){
-      this.slaveQueueByHost[k].push(slave);
-    }
-    this._deploying = false;
-    return slave;
-  }
-  async destroySlave(){
+    this.deploying = false;
   }
   async listen() {
-    await this.deploySlave();
+    //await this.tryDeployNewWorker();
     await this.server.listen();
   }
 }
