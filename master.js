@@ -37,10 +37,10 @@ class Worker {
   markDestroy(){
     this.destroyMarked = true;
   }
-  async destroy(){
+  async destroy(immediately){
     if(this.destroyPromise)
       return await this.destroyPromise;
-    this.destroyingPromise = this.deployment.destroy();
+    this.destroyingPromise = this.deployment.destroy(immediately);
     this._isReady = false;
     return await this.destroyingPromise;
   }
@@ -129,6 +129,20 @@ class MasterProxyServer {
     this.server.on('connectionClosed', ({ connectionId, stats }) => {
       console.log(`Connection ${connectionId} closed`);
     });
+    process.on('SIGTERM', () => {
+      console.info('SIGTERM signal received.');
+      console.log('Closing server gracefully...');
+      this.close().then(() => {
+        process.exit(0);
+      });
+    });
+    process.on('SIGINT', function() {
+      console.info('SIGINT signal received.');
+      console.log('Closing server gracefully...');
+      this.close().then(() => {
+        process.exit(0);
+      });
+    });
   }
   async nextProxyUrl(host){
     let queue = this.workerQueueByHost[host];
@@ -181,6 +195,18 @@ class MasterProxyServer {
   async listen() {
     //await this.tryDeployNewWorker();
     await this.server.listen();
+  }
+  async close(){
+    await this.server.close(true);
+    for(let worker of Object.values(this.workers)){
+      await worker.destroy(true);
+    }
+    let worker = this.pool.shift();
+    await worker.destroy(true);
+    while(worker){
+      worker = this.pool.shift();
+      await worker.destroy(true);
+    }
   }
 }
 

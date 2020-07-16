@@ -9,7 +9,7 @@ class Deployment {
   isAlive() {
     throw new Error("Not implemented");
   }
-  async detroy() {
+  async detroy(immediately) {
     throw new Error("Not implemented");
 	}
 }

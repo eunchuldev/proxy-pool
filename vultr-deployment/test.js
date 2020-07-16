@@ -1,8 +1,10 @@
-const VultrNode = require('@vultr/vultr-node')
-const vultr = VultrNode.initialize({
-  apiKey: "DNBT4GNZGW4WPQPY4NARSFLCY6PFIL4E5CDQ",
-});
-(async () =>{
-  let sshkeys = await vultr.sshkey.list()
-  console.log(sshkeys);
-})();
+const VultrDeployment = require("./index.js")
+const { MasterProxyServer } = require("proxy-pool");
+
+let server = new MasterProxyServer(VultrDeployment, {
+  port: 8080, 
+  desireRequestThroughputPerHost: 100, 
+  maxWorkerLiveTime: 3600, 
+  maxWorkerCount: 5, 
+  spareWorkerPoolSize: 1});
+server.listen();
