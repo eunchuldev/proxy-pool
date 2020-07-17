@@ -20,4 +20,10 @@ it("async priority queue", async () => {
   q.push(5);
   await a;
   await b;
+  q.push(3);
+  q.push(2);
+  q.push(1);
+  expect([...q.iterator()]).toEqual([1,3,2]);
+  q.remove(1);
+  expect([...q.iterator()]).toEqual([1,2]);
 });

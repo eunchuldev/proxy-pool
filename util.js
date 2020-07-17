@@ -38,6 +38,20 @@ class AsyncPriorityQueue {
   peek() {
     return this.q.peek();
   }
+  iterator() {
+    // monkey patch
+    return this.q.data;
+  }
+  remove(pos) {
+    // monkey patch
+    let target = this.q.data[pos];
+    let bottom = this.q.data.pop()
+    if(--this.q.length > 0){
+      this.q.data[pos] = bottom;
+      this.q._down(pos);
+    }
+    return target;
+  }
 }
 
 module.exports = {

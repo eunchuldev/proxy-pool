@@ -5,9 +5,9 @@ const vultr = VultrNode.initialize({
 const { Deployment } = require("proxy-pool");
 const util = require('util')
 const keygen = util.promisify(require('ssh-keygen'));
-const ssh = new (require('node-ssh'))();
 const path = require("path");
 const fs = require("fs");
+const Ssh = require('node-ssh');
 
 const VULTR_DEPLOYMENT_SSHKEY_NAME = "proxy-pool-deployment-ssh-key";
 const VULTR_TEMPLATE_VPS_LABEL = "proxy-pool-deployment-template-vps";
@@ -113,32 +113,43 @@ async function genSnapshot () {
   fs.writeFileSync(VULTR_TEMPLATE_SNAPSHOT_ID_PATH, snapshot.SNAPSHOTID);
   return snapshot.SNAPSHOTID;
 }
+async function genServer(sshkey){
+  console.log(new Date(), "create worker vps..")
+  const ssh = new Ssh();
+  let vps = await vultr.server.create({
+    OSID, VPSPLANID, DCID: REGIONID, SSHKEYID: sshkey.id, label: VULTR_PROXY_WORKER_VPS_LABEL,
+  });
+  vps = await waitVpsServerReady(vps.SUBID);
+  console.log(new Date(), "ip of worker vps: ", vps.main_ip);
+  while(!ssh.isConnected()){
+    try{
+      await ssh.connect({
+        host: vps.main_ip,
+        username: 'root',
+        privateKey: sshkey.privateKey
+      })
+    } catch(e) {
+      console.log(e);
+      await new Promise(r => setTimeout(r, 1000));
+    }
+  } 
+  console.log(new Date(), "run startup script...");
+  await ssh.putDirectory('data', '/var/app', { validate: (itemPath) => path.basename(itemPath) !== 'node_modules' });
+  let res = await ssh.execCommand('sh startup_script.sh', {cwd: '/var/app'});
+  ssh.dispose();
+  return vps;
+}
 
 class VultrDeployment extends Deployment {
-  async deploy() { 
-    if(VultrDeployment.snapshotId == null){
-      if(fs.existsSync(VULTR_TEMPLATE_SNAPSHOT_ID_PATH)){
-        let snapshotId = fs.readFileSync(VULTR_TEMPLATE_SNAPSHOT_ID_PATH, 'utf8');
-        console.log(snapshotId);
-        if((await vultr.snapshot.list({SNAPSHOTID: snapshotId}))[snapshotId])
-          VultrDeployment.snapshotId = snapshotId;
-      }
-      else{
-        throw new Error("hi");
-        VultrDeployment.snapshotId = await genSnapshot();
-      }
+  async deploy() {
+    this.deployingPromise = null;
+    if(VultrDeployment.sshkey == null){
+      VultrDeployment.sshkey = await genSshKey();
     }
-    this.id = (await vultr.server.create({
-      OSID: SNAPSHOT_OSID, 
-      SNAPSHOTID: VultrDeployment.snapshotId, 
-      DCID: REGIONID, 
-      label: VULTR_PROXY_WORKER_VPS_LABEL, 
-      VPSPLANID
-    })).SUBID;
-    await waitVpsServerReady(this.id);
-    await new Promise(r => setTimeout(r, 1000*60));
-    let vps = await waitVpsServerReady(this.id);
-    this._address = vps.main_ip;
+    this.deployingPromise = genServer(VultrDeployment.sshkey);
+    let vps = await this.deployingPromise;
+    this.id = vps.SUBID;
+    this._address = "http://" + vps.main_ip + ":80";
   }
   address() {
     return this._address;
@@ -149,7 +160,8 @@ class VultrDeployment extends Deployment {
   async destroy(immediately) {
     if(!immediately)
       await new Promise(r => setTimeout(r, 60000));
-    await vultr.server.delete({SUBID: parseInt(this.id)});
+    let vps = await this.deployingPromise;
+    await vultr.server.delete({SUBID: parseInt(vps.SUBID)});
   }
 }
 

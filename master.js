@@ -38,10 +38,12 @@ class Worker {
     this.destroyMarked = true;
   }
   async destroy(immediately){
+    this._isReady = false;
     if(this.destroyPromise)
       return await this.destroyPromise;
+    if(this.deployPromise)
+      await this.deployPromise;
     this.destroyingPromise = this.deployment.destroy(immediately);
-    this._isReady = false;
     return await this.destroyingPromise;
   }
   isDead(){
@@ -114,10 +116,9 @@ class MasterProxyServer {
     this.workerQueueByHost = {};
     this.server = new ProxyChain.Server({
       port: this.option.port,
-      //verbose: true,
+      verbose: false,
       prepareRequestFunction: async ({ request, username, password, hostname, port, isHttp, connectionId }) => {
         try{
-          console.log(connectionId);
           const proxyUrl = await this.nextProxyUrl(request.headers.host);
           return { upstreamProxyUrl: proxyUrl, };
         } catch(e){
@@ -136,7 +137,7 @@ class MasterProxyServer {
         process.exit(0);
       });
     });
-    process.on('SIGINT', function() {
+    process.on('SIGINT', () => {
       console.info('SIGINT signal received.');
       console.log('Closing server gracefully...');
       this.close().then(() => {
@@ -155,13 +156,11 @@ class MasterProxyServer {
       worker = await queue.pop();
     }
     while(worker.isDead()){
-      console.log("dead", worker.id);
       this.dropWorker(worker);
       if(queue.peek() == undefined)
         this.tryDeployNewWorker();
       worker = await queue.pop();
     }
-    console.log("elapsed", worker.id, worker.elapsed(host));
     if(worker.elapsed(host) < 1000/this.option.desireRequestThroughputPerHost){
       this.tryDeployNewWorker();
       await sleep(1000/this.option.desireRequestThroughputPerHost - worker.elapsed(host))
@@ -195,17 +194,34 @@ class MasterProxyServer {
   async listen() {
     //await this.tryDeployNewWorker();
     await this.server.listen();
+    this.vacuumTick = setInterval(() => this.vacuum(), 1000);
+  }
+  vacuum() {
+    for(let i in this.workers){
+      if(this.workers[i].liveTime() > this.option.maxWorkerLiveTime*1000){
+        this.dropWorker(this.workers[i]);
+      }
+    }
+    for(let host in this.workerQueueByHost){
+      let iter = this.workerQueueByHost[host].iterator();
+      for(let i=0, l=iter.length; i<l; ++i){
+        if(iter[i].isDead()){
+          this.workerQueueByHost[host].remove(i);
+          --i; --l;
+        }
+      }
+    }
   }
   async close(){
+    clearInterval(this.vacuumTick);
     await this.server.close(true);
     for(let worker of Object.values(this.workers)){
       await worker.destroy(true);
     }
-    let worker = this.pool.shift();
-    await worker.destroy(true);
+    let worker = this.workerPool.pool.shift();
     while(worker){
-      worker = this.pool.shift();
       await worker.destroy(true);
+      worker = this.workerPool.pool.shift();
     }
   }
 }

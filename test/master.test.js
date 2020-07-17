@@ -1,6 +1,7 @@
 const { sleep, } = require('../util');
 const ProxyChain = require('proxy-chain');
 const MasterProxyServer = require('../master');
+const tunnel = require("tunnel");
 axios = require("axios");
 
 describe("unit test", () => {
@@ -40,6 +41,7 @@ describe("unit test", () => {
       await this.server.close();
     }
   }
+
   /*
   it("one time proxy", async () => {
     let port = 8080;
@@ -140,6 +142,12 @@ describe("unit test", () => {
     nextPort = 10040;
     let server = new MasterProxyServer(testDeployment, {port, desireRequestThroughputPerHost: 100, maxWorkerLiveTime: 1, maxWorkerCount: 2});
     await server.listen();
+    var tunnelingAgent = tunnel.httpOverHttp({
+      proxy: {
+        host: '127.0.0.1',
+        port: 8080
+      }
+    });
     let t = new Date();
     let res = await Promise.all([...Array(10).keys()].map(i => axios.get("http://tsu.gg", { proxy: { host: '127.0.0.1', port, } }).then(res => res.data)));
     for(let r of res)
