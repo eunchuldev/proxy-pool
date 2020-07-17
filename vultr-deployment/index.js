@@ -1,6 +1,6 @@
 const VultrNode = require('@vultr/vultr-node')
 const vultr = VultrNode.initialize({
-  apiKey: "DNBT4GNZGW4WPQPY4NARSFLCY6PFIL4E5CDQ",
+  apiKey: process.env.VULTR_API_KEY,
 });
 const { Deployment } = require("proxy-pool");
 const util = require('util')
