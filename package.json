@@ -1,19 +1,21 @@
 {
-  "name": "proxy-pool",
-  "version": "1.0.2",
-  "description": "",
+  "name": "proxy-cloud-pool",
+  "version": "0.0.4",
+  "description": "nodejs proxy pool",
   "main": "index.js",
   "scripts": {
     "test": "jest"
   },
-  "author": "",
-  "license": "ISC",
+  "author": "Eunchul",
+  "license": "MIT",
   "dependencies": {
-    "axios": "^0.19.2",
     "denque": "^1.4.1",
     "proxy-chain": "^0.4.5",
     "tinyqueue": "^2.0.3",
     "tunnel": "0.0.6"
+  },
+  "devDependencies": {
+    "axios": "^0.19.2"
   },
   "jest": {
     "testEnvironment": "node"

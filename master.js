@@ -35,7 +35,10 @@ class Worker {
     this.deployPromise.then(_ => {
       if(!this.destroyMarked)
         this._isReady = true
-    })
+    }).catch(e => {
+      this.markDestroy();
+      this.destroy();
+    });
   }
   markDestroy(){
     this.destroyMarked = true;
@@ -46,7 +49,11 @@ class Worker {
     if(this.destroyPromise)
       return await this.destroyPromise;
     if(this.deployPromise)
-      await this.deployPromise;
+      try {
+        await this.deployPromise;
+      } catch (e) {
+        console.log(e);
+      }
     this.destroyingPromise = this.deployment.destroy(immediately);
     return await this.destroyingPromise;
   }
