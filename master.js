@@ -32,12 +32,16 @@ class Worker {
   }
   deploy() {
     this.deployPromise = this.deployment.deploy();
-    this._isReady = true
+    this.deployPromise.then(_ => {
+      if(!this.destroyMarked)
+        this._isReady = true
+    })
   }
   markDestroy(){
     this.destroyMarked = true;
   }
   async destroy(immediately){
+    this.markDestroy();
     this._isReady = false;
     if(this.destroyPromise)
       return await this.destroyPromise;

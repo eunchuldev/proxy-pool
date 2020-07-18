@@ -41,8 +41,6 @@ describe("unit test", () => {
       await this.server.close();
     }
   }
-
-  /*
   it("one time proxy", async () => {
     let port = 8080;
     nextPort = 10000;
@@ -136,7 +134,6 @@ describe("unit test", () => {
     let elapsed = new Date() - t;
     expect(elapsed).toBeLessThan(5000);
   })
-  */
   it("proxy lifetime expired", async () => {
     let port = 8085;
     nextPort = 10040;
