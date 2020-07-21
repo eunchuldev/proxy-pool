@@ -138,9 +138,6 @@ class MasterProxyServer {
         }
       },
     });
-    this.server.on('connectionClosed', ({ connectionId, stats }) => {
-      console.log(`Connection ${connectionId} closed`);
-    });
     process.on('SIGTERM', () => {
       console.info('SIGTERM signal received.');
       console.log('Closing server gracefully...');
@@ -188,7 +185,7 @@ class MasterProxyServer {
         this.tryDeployNewWorker();
     }
     worker.markDestroy();
-    worker.destroy();
+    worker.destroy().catch(e => console.log(e));
   }
   async tryDeployNewWorker(){
     if(this.deploying || this.workerCount >= this.option.maxWorkerCount)
