@@ -1,6 +1,6 @@
 {
   "name": "proxy-cloud-pool",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "nodejs proxy pool",
   "main": "build/src/index.js",
   "types": "build/src/index.d.ts",
@@ -15,7 +15,6 @@
     "clean": "gts clean",
     "compile": "tsc",
     "fix": "gts fix",
-    "proxy-chain": "^0.4.5",
     "prepare": "npm run compile",
     "pretest": "npm run compile",
     "posttest": "npm run check"
@@ -32,6 +31,7 @@
     "typescript": "^3.8.3"
   },
   "dependencies": {
-    "denque": "^1.4.1"
+    "denque": "^1.4.1",
+    "proxy-chain": "^0.4.5"
   }
 }
