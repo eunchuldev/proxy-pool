@@ -1,0 +1,16 @@
+[package]
+name = "ttanggul"
+version = "0.0.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+hyper = { version="1.0.0-rc.4", features = ["full"] }
+hyper-util = { version = "*", features = ["full"], git = "https://github.com/hyperium/hyper-util" }
+tokio = { version = "^1", features = ["rt", "rt-multi-thread", "sync", "time", "net", "macros"] }
+bytes = "^1"
+http-body-util = "0.1.0-rc.3"
+http = "0.2"
+thiserror="^1"
+clap = { version = "^4", features = ["derive"] }
